@@ -1,9 +1,9 @@
 from fastapi import FastAPI
-from app.api.routes import router as api_router
+from app.api.routes.cv import router as cv_router
 
 app = FastAPI(title="CV Analyzer API")
 
-app.include_router(api_router, prefix="/v1")
+app.include_router(cv_router, prefix="/v1")
 
 
 @app.get("/health")
