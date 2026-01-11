@@ -3,6 +3,7 @@
 from app.adapters.llm.base import AbstractLLMClient
 from app.adapters.llm.openai_client import OpenAIClient
 from app.core.config import settings
+from app.core.errors import ValidationAppError
 
 
 def create_llm_client() -> AbstractLLMClient:
@@ -15,15 +16,16 @@ def create_llm_client() -> AbstractLLMClient:
         AbstractLLMClient: Configured LLM client instance.
 
     Raises:
-        ValueError: If provider-specific requirements are not met.
+        ValidationAppError: If provider-specific requirements are not met.
     """
     provider = settings.llm.provider.lower()
 
     # Route to OpenAI
     if provider == "openai":
         if not settings.llm.api_key:
-            raise ValueError(
-                "OpenAI provider requires LLM_API_KEY environment variable"
+            raise ValidationAppError(
+                code="llm_missing_api_key",
+                message="OpenAI provider requires LLM_API_KEY environment variable",
             )
         return OpenAIClient(
             api_key=settings.llm.api_key,
@@ -51,7 +53,9 @@ def create_llm_client() -> AbstractLLMClient:
     #         timeout_seconds=settings.llm.timeout_seconds,
     #     )
 
-    raise ValueError(
-        f"Unknown LLM provider: '{provider}'. "
-        "Supported providers: openai"
+    raise ValidationAppError(
+        code="llm_unknown_provider",
+        message=(
+            f"Unknown LLM provider: '{provider}'. Supported providers: openai"
+        ),
     )

@@ -13,6 +13,7 @@ os.environ.setdefault("LLM_API_KEY", "test-key")
 
 from app.adapters.llm import OpenAIClient, create_llm_client
 from app.core.config import settings, LLMSettings, Settings, AppSettings
+from app.core.errors import ValidationAppError
 
 
 class TestOpenAIClientIntegration:
@@ -140,10 +141,13 @@ class TestLLMFactory:
             provider="openai",
             api_key=None,
             model="gpt-4o",
+            base_url=None,
+            timeout_seconds=45.0,
         )
 
-        with pytest.raises(ValueError, match="requires LLM_API_KEY"):
+        with pytest.raises(ValidationAppError, match="requires LLM_API_KEY") as exc:
             create_llm_client()
+        assert exc.value.code == "llm_missing_api_key"
 
     def test_create_llm_client_unknown_provider_raises_error(self) -> None:
         """Test factory raises error for unknown provider.
@@ -154,10 +158,13 @@ class TestLLMFactory:
             provider="unknown-provider",
             api_key="test-key",
             model="gpt-4o",
+            base_url=None,
+            timeout_seconds=45.0,
         )
 
-        with pytest.raises(ValueError, match="Unknown LLM provider"):
+        with pytest.raises(ValidationAppError, match="Unknown LLM provider") as exc:
             create_llm_client()
+        assert exc.value.code == "llm_unknown_provider"
 
     def test_create_llm_client_with_new_settings_instance(self) -> None:
         """Test factory using a fresh Settings instance.
@@ -169,8 +176,16 @@ class TestLLMFactory:
                 provider="openai",
                 api_key="env-key",
                 model="gpt-4o",
+                base_url=None,
+                timeout_seconds=45.0,
             ),
-            app=AppSettings(),
+            app=AppSettings(
+                debug=False,
+                max_upload_size_mb=10,
+                max_cv_chars=50000,
+                max_job_desc_chars=10000,
+                api_key_required=True,
+            ),
         )
         # Patch the global settings reference
         import app.core.config as cfg
