@@ -76,6 +76,14 @@ class AppSettings(BaseSettings):
         10000,
         description="Maximum job description text length in characters",
     )
+    min_cv_chars: int = Field(
+        500,
+        description="Minimum CV text length to avoid image-based PDFs without OCR",
+    )
+    cv_preview_chars: int = Field(
+        800,
+        description="Number of characters to include in CV preview",
+    )
     api_key_required: bool = Field(
         True,
         description="Whether API key authentication is required",
