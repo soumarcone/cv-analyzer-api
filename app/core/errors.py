@@ -35,3 +35,7 @@ class ValidationAppError(AppError):
 
 class LLMAppError(AppError):
     """Raised when LLM provider/client operations fail."""
+
+
+class AuthenticationAppError(AppError):
+    """Raised when authentication/authorization fails."""
