@@ -3,6 +3,11 @@
 This module tests the FastAPI endpoints for CV parsing and analysis,
 including request validation, error handling, and integration with
 service layer and LLM client.
+
+IMPORTANT: API Key Authentication
+- All /v1/cv/* endpoints require X-API-Key header
+- Use valid_api_key_headers fixture in tests
+- Some legacy tests may need updating to include authentication headers
 """
 
 import io
@@ -18,6 +23,9 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("LLM_PROVIDER", "openai")
 os.environ.setdefault("LLM_MODEL", "gpt-4o")
 os.environ.setdefault("LLM_API_KEY", "test-key-123")
+# For tests, we'll set up API keys but tests need to explicitly use headers
+os.environ.setdefault("API_KEY_REQUIRED", "true")
+os.environ.setdefault("API_KEYS", "test-api-key-123,test-api-key-456")
 
 from app.main import app
 from app.core.errors import ValidationAppError, LLMAppError
@@ -28,6 +36,12 @@ from app.schemas.analysis import CVAnalysisResponse
 def client() -> TestClient:
     """Create FastAPI test client."""
     return TestClient(app)
+
+
+@pytest.fixture
+def valid_api_key_headers() -> dict[str, str]:
+    """Create valid API key headers for authenticated requests."""
+    return {"X-API-Key": "test-api-key-123"}
 
 
 @pytest.fixture
@@ -194,19 +208,103 @@ class TestHealthCheck:
         assert response.json() == {"status": "ok"}
 
 
+# ======================== Authentication Tests ========================
+
+
+class TestAPIKeyAuthentication:
+    """Test API key authentication on protected endpoints."""
+
+    def test_parse_cv_without_api_key_returns_403(
+        self, client: TestClient, sample_pdf_bytes: bytes
+    ) -> None:
+        """Test that requests without API key are rejected."""
+        files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
+        
+        response = client.post("/v1/cv/parse", files=files)
+        
+        assert response.status_code == 403
+        assert "Missing API key" in response.json()["detail"]
+
+    def test_parse_cv_with_invalid_api_key_returns_403(
+        self, client: TestClient, sample_pdf_bytes: bytes
+    ) -> None:
+        """Test that requests with invalid API key are rejected."""
+        files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
+        headers = {"X-API-Key": "invalid-key-999"}
+        
+        response = client.post("/v1/cv/parse", files=files, headers=headers)
+        
+        assert response.status_code == 403
+        assert "Invalid" in response.json()["detail"]
+
+    def test_parse_cv_with_valid_api_key_succeeds(
+        self, client: TestClient, sample_pdf_bytes: bytes, valid_api_key_headers: dict[str, str]
+    ) -> None:
+        """Test that requests with valid API key are accepted."""
+        files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
+        
+        response = client.post("/v1/cv/parse", files=files, headers=valid_api_key_headers)
+        
+        assert response.status_code == 200
+
+    def test_analyze_cv_without_api_key_returns_403(
+        self, client: TestClient, sample_pdf_bytes: bytes
+    ) -> None:
+        """Test that analyze endpoint rejects requests without API key."""
+        files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
+        data = {"job_description": "Senior Python developer"}
+        
+        response = client.post("/v1/cv/analyze", files=files, data=data)
+        
+        assert response.status_code == 403
+        assert "Missing API key" in response.json()["detail"]
+
+    def test_analyze_cv_with_invalid_api_key_returns_403(
+        self, client: TestClient, sample_pdf_bytes: bytes
+    ) -> None:
+        """Test that analyze endpoint rejects invalid API keys."""
+        files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
+        data = {"job_description": "Senior Python developer"}
+        headers = {"X-API-Key": "wrong-key"}
+        
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=headers)
+        
+        assert response.status_code == 403
+
+    def test_multiple_valid_api_keys_accepted(
+        self, client: TestClient, sample_pdf_bytes: bytes
+    ) -> None:
+        """Test that all configured API keys work."""
+        files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
+        
+        # Test first key
+        headers1 = {"X-API-Key": "test-api-key-123"}
+        response1 = client.post("/v1/cv/parse", files=files, headers=headers1)
+        assert response1.status_code == 200
+        
+        # Test second key
+        headers2 = {"X-API-Key": "test-api-key-456"}
+        response2 = client.post("/v1/cv/parse", files=files, headers=headers2)
+        assert response2.status_code == 200
+
+
 # ======================== CV Parse Endpoint Tests ========================
 
 
 class TestParseCVEndpoint:
-    """Test the /cv/parse endpoint."""
+    """Test the /cv/parse endpoint.
+    
+    Note: All tests in this class require authentication via X-API-Key header.
+    Tests use the valid_api_key_headers fixture to provide authentication.
+    """
 
     def test_parse_cv_pdf_success(
-        self, client: TestClient, sample_pdf_bytes: bytes
+        self, client: TestClient, sample_pdf_bytes: bytes, valid_api_key_headers: dict[str, str]
     ) -> None:
         """Test successful PDF parsing."""
         files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
         
-        response = client.post("/v1/cv/parse", files=files)
+        response = client.post("/v1/cv/parse", files=files, headers=valid_api_key_headers)
         
         assert response.status_code == 200
         result = response.json()
@@ -219,13 +317,13 @@ class TestParseCVEndpoint:
         assert isinstance(result["warnings"], list)
 
     def test_parse_cv_docx_success(
-        self, client: TestClient, sample_docx_bytes: bytes
+        self, client: TestClient, sample_docx_bytes: bytes, valid_api_key_headers: dict[str, str]
     ) -> None:
         """Test successful DOCX parsing."""
         files = {"cv_file": ("resume.docx", io.BytesIO(sample_docx_bytes), 
                             "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
         
-        response = client.post("/v1/cv/parse", files=files)
+        response = client.post("/v1/cv/parse", files=files, headers=valid_api_key_headers)
         
         assert response.status_code == 200
         result = response.json()
@@ -235,37 +333,37 @@ class TestParseCVEndpoint:
         assert "text" in result
         assert "meta" in result
 
-    def test_parse_cv_unsupported_file_type(self, client: TestClient) -> None:
+    def test_parse_cv_unsupported_file_type(self, client: TestClient, valid_api_key_headers: dict[str, str]) -> None:
         """Test that unsupported file types are rejected."""
         files = {"cv_file": ("resume.txt", io.BytesIO(b"Plain text"), "text/plain")}
         
-        response = client.post("/v1/cv/parse", files=files)
+        response = client.post("/v1/cv/parse", files=files, headers=valid_api_key_headers)
         
         assert response.status_code == 400
         assert "Unsupported file type" in response.json()["detail"]
 
-    def test_parse_cv_empty_file(self, client: TestClient) -> None:
+    def test_parse_cv_empty_file(self, client: TestClient, valid_api_key_headers: dict[str, str]) -> None:
         """Test that empty files are rejected."""
         files = {"cv_file": ("empty.pdf", io.BytesIO(b""), "application/pdf")}
         
-        response = client.post("/v1/cv/parse", files=files)
+        response = client.post("/v1/cv/parse", files=files, headers=valid_api_key_headers)
         
         assert response.status_code == 400
         assert "Empty file" in response.json()["detail"]
 
-    def test_parse_cv_no_file_provided(self, client: TestClient) -> None:
+    def test_parse_cv_no_file_provided(self, client: TestClient, valid_api_key_headers: dict[str, str]) -> None:
         """Test that missing file raises validation error."""
-        response = client.post("/v1/cv/parse")
+        response = client.post("/v1/cv/parse", headers=valid_api_key_headers)
         
         assert response.status_code == 422  # FastAPI validation error
 
     def test_parse_cv_preview_truncation(
-        self, client: TestClient, sample_pdf_bytes: bytes
+        self, client: TestClient, sample_pdf_bytes: bytes, valid_api_key_headers: dict[str, str]
     ) -> None:
         """Test that preview is truncated to configured limit."""
         files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
         
-        response = client.post("/v1/cv/parse", files=files)
+        response = client.post("/v1/cv/parse", files=files, headers=valid_api_key_headers)
         
         assert response.status_code == 200
         result = response.json()
@@ -277,7 +375,11 @@ class TestParseCVEndpoint:
 
 
 class TestAnalyzeCVEndpoint:
-    """Test the /cv/analyze endpoint."""
+    """Test the /cv/analyze endpoint.
+    
+    Note: All tests in this class require authentication via X-API-Key header.
+    Tests use the valid_api_key_headers fixture to provide authentication.
+    """
 
     @patch("app.api.routes.cv._analysis_service")
     def test_analyze_cv_success(
@@ -286,6 +388,7 @@ class TestAnalyzeCVEndpoint:
         client: TestClient,
         sample_pdf_bytes: bytes,
         sample_cv_analysis_response: dict,
+        valid_api_key_headers: dict[str, str],
     ) -> None:
         """Test successful CV analysis with PDF."""
         # Mock the analysis service
@@ -296,7 +399,7 @@ class TestAnalyzeCVEndpoint:
         files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
         data = {"job_description": "Looking for senior Python developer with FastAPI expertise"}
         
-        response = client.post("/v1/cv/analyze", files=files, data=data)
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
         
         assert response.status_code == 200
         result = response.json()
@@ -314,6 +417,7 @@ class TestAnalyzeCVEndpoint:
         client: TestClient,
         sample_docx_bytes: bytes,
         sample_cv_analysis_response: dict,
+        valid_api_key_headers: dict[str, str],
     ) -> None:
         """Test successful CV analysis with DOCX."""
         mock_service.analyze = AsyncMock(
@@ -324,7 +428,7 @@ class TestAnalyzeCVEndpoint:
                             "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
         data = {"job_description": "Senior Python developer required"}
         
-        response = client.post("/v1/cv/analyze", files=files, data=data)
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
         
         assert response.status_code == 200
         result = response.json()
@@ -337,6 +441,7 @@ class TestAnalyzeCVEndpoint:
         client: TestClient,
         sample_pdf_bytes: bytes,
         sample_cv_analysis_response: dict,
+        valid_api_key_headers: dict[str, str],
     ) -> None:
         """Test that cached responses are returned with cached=True."""
         cached_response = {**sample_cv_analysis_response, "cached": True}
@@ -347,7 +452,7 @@ class TestAnalyzeCVEndpoint:
         files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
         data = {"job_description": "Senior Python developer"}
         
-        response = client.post("/v1/cv/analyze", files=files, data=data)
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
         
         assert response.status_code == 200
         result = response.json()
