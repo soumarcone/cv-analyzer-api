@@ -185,6 +185,7 @@ class TestLLMFactory:
                 max_cv_chars=50000,
                 max_job_desc_chars=10000,
                 api_key_required=True,
+                api_keys="test-key-1,test-key-2",
                 min_cv_chars=500,
                 cv_preview_chars=800,
             ),
