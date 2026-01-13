@@ -88,6 +88,10 @@ class AppSettings(BaseSettings):
         True,
         description="Whether API key authentication is required",
     )
+    api_keys: str | None = Field(
+        None,
+        description="Comma-separated list of valid API keys for authentication",
+    )
 
     model_config = SettingsConfigDict(
         case_sensitive=False,
