@@ -21,9 +21,6 @@ from app.utils.simple_cache import SimpleTTLCache
 # Prompt version for cache invalidation when prompt changes
 PROMPT_VERSION = "v1"
 
-# Minimum CV length to avoid analyzing empty/broken PDFs
-MIN_CV_CHARS = 500
-
 
 def _truncate(text: str, max_chars: int) -> tuple[str, bool]:
     """Truncate text to max_chars if needed.
@@ -152,12 +149,12 @@ class AnalysisService:
         Raises:
             ValidationAppError: If inputs are too short or empty.
         """
-        if not cv_text or len(cv_text.strip()) < MIN_CV_CHARS:
+        if not cv_text or len(cv_text.strip()) < settings.app.min_cv_chars:
             raise ValidationAppError(
                 code="cv_text_too_short",
                 message="CV text is too short. PDF may be image-based (OCR not supported in MVP).",
                 details={
-                    "min_chars": MIN_CV_CHARS,
+                    "min_chars": settings.app.min_cv_chars,
                     "actual": len(cv_text.strip()) if cv_text else 0,
                 },
             )
