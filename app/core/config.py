@@ -1,26 +1,65 @@
-"""Application configuration using Pydantic Settings."""
+"""Application configuration using Pydantic Settings.
+
+Configuration is environment-aware:
+- APP_ENV determines which .env file to load
+- Supports: development, testing, staging, production
+- Each environment has its own .env.{environment} file
+"""
 
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def _build_llm_settings() -> "LLMSettings":
-    """Build LLM settings from env.
+# Determine which environment to load (default: development)
+APP_ENV = os.getenv("APP_ENV", "development")
 
-    Pydantic's generated __init__ signature marks required fields as required
-    for static type checkers, even though BaseSettings can populate them from
-    environment variables.
+# Project root (so .env resolution doesn't depend on current working directory)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+# Map environments to their respective .env files (relative to PROJECT_ROOT)
+ENV_FILE_MAP = {
+    "development": ".env.development",
+    "testing": ".env.testing",
+    "staging": ".env.staging",
+    "production": ".env.production",
+}
+
+# Select the .env file for the current environment
+_env_filename = ENV_FILE_MAP.get(APP_ENV, ".env.development")
+_env_path = PROJECT_ROOT / _env_filename
+
+# Only load from file if it exists (production might inject via env vars only)
+_env_file = str(_env_path) if _env_path.is_file() else None
+
+
+# Load .env file early to populate os.environ before creating nested settings
+# This is necessary because Pydantic nested BaseSettings don't inherit env_file
+if _env_file:
+    from dotenv import load_dotenv
+    load_dotenv(_env_file, override=True)
+
+
+def _build_llm_settings() -> "LLMSettings":
+    """Build LLM settings from environment.
+
+    Pydantic Settings (v2) can populate values from environment variables.
+    However, static type checkers often treat required fields as required
+    constructor arguments, which is not how BaseSettings is intended to be used.
     """
 
     return LLMSettings()  # type: ignore[call-arg]
 
 
 def _build_app_settings() -> "AppSettings":
-    """Build application settings from env with sane defaults."""
+    """Build app settings from environment.
+
+    See _build_llm_settings() for rationale about the type ignore.
+    """
 
     return AppSettings()  # type: ignore[call-arg]
 
@@ -104,17 +143,21 @@ class AppSettings(BaseSettings):
 class Settings(BaseSettings):
     """Main application settings container.
     
-    Automatically loads from .env file and validates all configuration.
+    Automatically loads from the appropriate .env.{APP_ENV} file.
     Raises validation errors on startup if required settings are missing.
+    
+    Environments:
+    - development: Local development (DEBUG=true)
+    - testing: Automated tests (uses .env.testing)
+    - staging: Pre-production (uses .env.staging)
+    - production: Production deployment (uses .env.production)
     """
 
+    app_env: str = APP_ENV
     llm: LLMSettings = Field(default_factory=_build_llm_settings)
     app: AppSettings = Field(default_factory=_build_app_settings)
 
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("TESTING") else None,
-        env_file_encoding="utf-8",
-        env_nested_delimiter="__",
         case_sensitive=False,
     )
 

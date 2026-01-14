@@ -1,19 +1,12 @@
 """Pytest configuration and fixtures shared across all test modules.
 
 This file is automatically loaded by pytest before running any tests.
-It ensures that the TESTING environment variable is set to prevent
-loading the .env file during tests.
+With APP_ENV=testing, the correct .env.testing file is loaded automatically.
 """
 
 import os
 
-# CRITICAL: Set this before any imports that might load settings
-# This prevents Pydantic from loading the .env file in tests
-os.environ["TESTING"] = "true"
+# Ensure testing environment is set before any app imports
+# Force APP_ENV to testing (not setdefault, to override any existing value)
+os.environ["APP_ENV"] = "testing"
 
-# Set default env vars that all tests might need
-os.environ.setdefault("LLM_PROVIDER", "openai")
-os.environ.setdefault("LLM_MODEL", "gpt-4o")
-os.environ.setdefault("LLM_API_KEY", "test-key-123")
-os.environ.setdefault("APP_API_KEY_REQUIRED", "true")
-os.environ.setdefault("APP_API_KEYS", "test-api-key-123,test-api-key-456")
