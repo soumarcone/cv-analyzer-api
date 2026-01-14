@@ -135,7 +135,11 @@ celerybeat.pid
 *.sage.py
 
 # Environments
+# Ignore all .env files with real secrets
 .env
+.env.development
+.env.staging
+.env.production
 .envrc
 .venv
 env/
@@ -143,6 +147,12 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Allow public configuration files and templates
+# These contain only dummy/test values, safe to commit
+!.env.example
+!.env.testing
+
 
 # Spyder project settings
 .spyderproject
