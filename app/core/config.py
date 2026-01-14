@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -94,6 +96,7 @@ class AppSettings(BaseSettings):
     )
 
     model_config = SettingsConfigDict(
+        env_prefix="APP_",
         case_sensitive=False,
     )
 
@@ -109,7 +112,7 @@ class Settings(BaseSettings):
     app: AppSettings = Field(default_factory=_build_app_settings)
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=".env" if not os.getenv("TESTING") else None,
         env_file_encoding="utf-8",
         env_nested_delimiter="__",
         case_sensitive=False,

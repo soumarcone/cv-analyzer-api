@@ -20,12 +20,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 # Set required env vars before importing settings
-os.environ.setdefault("LLM_PROVIDER", "openai")
-os.environ.setdefault("LLM_MODEL", "gpt-4o")
-os.environ.setdefault("LLM_API_KEY", "test-key-123")
+# Disable .env file loading for tests
+os.environ["TESTING"] = "true"
+os.environ["LLM_PROVIDER"] = "openai"
+os.environ["LLM_MODEL"] = "gpt-4o"
+os.environ["LLM_API_KEY"] = "test-key-123"
 # For tests, we'll set up API keys but tests need to explicitly use headers
-os.environ.setdefault("API_KEY_REQUIRED", "true")
-os.environ.setdefault("API_KEYS", "test-api-key-123,test-api-key-456")
+os.environ["APP_API_KEY_REQUIRED"] = "true"
+os.environ["APP_API_KEYS"] = "test-api-key-123,test-api-key-456"
 
 from app.main import app
 from app.core.errors import ValidationAppError, LLMAppError
@@ -465,6 +467,7 @@ class TestAnalyzeCVEndpoint:
         client: TestClient,
         sample_pdf_bytes: bytes,
         sample_cv_analysis_response: dict,
+        valid_api_key_headers: dict[str, str],
     ) -> None:
         """Test that warnings from parsing are included in response."""
         with_warnings = {
@@ -478,7 +481,7 @@ class TestAnalyzeCVEndpoint:
         files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
         data = {"job_description": "Senior Python developer"}
         
-        response = client.post("/v1/cv/analyze", files=files, data=data)
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
         
         assert response.status_code == 200
         result = response.json()
@@ -491,6 +494,7 @@ class TestAnalyzeCVEndpoint:
         client: TestClient,
         sample_pdf_bytes: bytes,
         sample_cv_analysis_response: dict,
+        valid_api_key_headers: dict[str, str],
     ) -> None:
         """Test that evidence items are properly returned."""
         mock_service.analyze = AsyncMock(
@@ -500,7 +504,7 @@ class TestAnalyzeCVEndpoint:
         files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
         data = {"job_description": "Senior Python developer"}
         
-        response = client.post("/v1/cv/analyze", files=files, data=data)
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
         
         assert response.status_code == 200
         result = response.json()
@@ -508,40 +512,46 @@ class TestAnalyzeCVEndpoint:
         assert "claim" in result["evidence"][0]
         assert "cv_quote" in result["evidence"][0]
 
-    def test_analyze_cv_missing_file(self, client: TestClient) -> None:
+    def test_analyze_cv_missing_file(
+        self, client: TestClient, valid_api_key_headers: dict[str, str]
+    ) -> None:
         """Test that missing CV file raises error."""
         data = {"job_description": "Senior Python developer"}
         
-        response = client.post("/v1/cv/analyze", data=data)
+        response = client.post("/v1/cv/analyze", data=data, headers=valid_api_key_headers)
         
         assert response.status_code == 422
 
     def test_analyze_cv_missing_job_description(
-        self, client: TestClient, sample_pdf_bytes: bytes
+        self, client: TestClient, sample_pdf_bytes: bytes, valid_api_key_headers: dict[str, str]
     ) -> None:
         """Test that missing job description raises error."""
         files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
         
-        response = client.post("/v1/cv/analyze", files=files)
+        response = client.post("/v1/cv/analyze", files=files, headers=valid_api_key_headers)
         
         assert response.status_code == 422
 
-    def test_analyze_cv_unsupported_file_type(self, client: TestClient) -> None:
+    def test_analyze_cv_unsupported_file_type(
+        self, client: TestClient, valid_api_key_headers: dict[str, str]
+    ) -> None:
         """Test that unsupported file types are rejected."""
         files = {"cv_file": ("resume.txt", io.BytesIO(b"X" * 600), "text/plain")}
         data = {"job_description": "Senior Python developer"}
         
-        response = client.post("/v1/cv/analyze", files=files, data=data)
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
         
         assert response.status_code == 400
         assert "Unsupported file type" in response.json()["detail"]
 
-    def test_analyze_cv_empty_file(self, client: TestClient) -> None:
+    def test_analyze_cv_empty_file(
+        self, client: TestClient, valid_api_key_headers: dict[str, str]
+    ) -> None:
         """Test that empty CV files are rejected."""
         files = {"cv_file": ("resume.pdf", io.BytesIO(b""), "application/pdf")}
         data = {"job_description": "Senior Python developer"}
         
-        response = client.post("/v1/cv/analyze", files=files, data=data)
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
         
         assert response.status_code == 400
         assert "Empty file" in response.json()["detail"]
@@ -559,6 +569,7 @@ class TestAnalyzeCVErrorHandling:
         mock_service: MagicMock,
         client: TestClient,
         sample_pdf_bytes: bytes,
+        valid_api_key_headers: dict[str, str],
     ) -> None:
         """Test that ValidationAppError returns 400."""
         mock_service.analyze = AsyncMock(
@@ -571,7 +582,7 @@ class TestAnalyzeCVErrorHandling:
         files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
         data = {"job_description": "Senior Python developer"}
         
-        response = client.post("/v1/cv/analyze", files=files, data=data)
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
         
         assert response.status_code == 400
         assert "CV text is too short" in response.json()["detail"]
@@ -582,6 +593,7 @@ class TestAnalyzeCVErrorHandling:
         mock_service: MagicMock,
         client: TestClient,
         sample_pdf_bytes: bytes,
+        valid_api_key_headers: dict[str, str],
     ) -> None:
         """Test that LLMAppError returns 500."""
         mock_service.analyze = AsyncMock(
@@ -594,7 +606,7 @@ class TestAnalyzeCVErrorHandling:
         files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
         data = {"job_description": "Senior Python developer"}
         
-        response = client.post("/v1/cv/analyze", files=files, data=data)
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
         
         assert response.status_code == 500
         assert "OpenAI API error" in response.json()["detail"]
@@ -605,6 +617,7 @@ class TestAnalyzeCVErrorHandling:
         mock_service: MagicMock,
         client: TestClient,
         sample_pdf_bytes: bytes,
+        valid_api_key_headers: dict[str, str],
     ) -> None:
         """Test that unexpected errors return 500 with generic message."""
         mock_service.analyze = AsyncMock(
@@ -614,7 +627,7 @@ class TestAnalyzeCVErrorHandling:
         files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
         data = {"job_description": "Senior Python developer"}
         
-        response = client.post("/v1/cv/analyze", files=files, data=data)
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
         
         assert response.status_code == 500
         assert "Unexpected error during analysis" in response.json()["detail"]
@@ -633,6 +646,7 @@ class TestAnalyzeCVResponseSchema:
         client: TestClient,
         sample_pdf_bytes: bytes,
         sample_cv_analysis_response: dict,
+        valid_api_key_headers: dict[str, str],
     ) -> None:
         """Test that response contains all required fields."""
         mock_service.analyze = AsyncMock(
@@ -642,7 +656,7 @@ class TestAnalyzeCVResponseSchema:
         files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
         data = {"job_description": "Senior Python developer"}
         
-        response = client.post("/v1/cv/analyze", files=files, data=data)
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
         
         assert response.status_code == 200
         result = response.json()
@@ -675,6 +689,7 @@ class TestAnalyzeCVResponseSchema:
         client: TestClient,
         sample_pdf_bytes: bytes,
         sample_cv_analysis_response: dict,
+        valid_api_key_headers: dict[str, str],
     ) -> None:
         """Test that fit_score is in valid range 0-100."""
         # Test with fit_score = 0
@@ -686,7 +701,7 @@ class TestAnalyzeCVResponseSchema:
         files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
         data = {"job_description": "Senior Python developer"}
         
-        response = client.post("/v1/cv/analyze", files=files, data=data)
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
         assert response.status_code == 200
         assert response.json()["fit_score"] == 0
         
@@ -696,7 +711,7 @@ class TestAnalyzeCVResponseSchema:
             return_value=CVAnalysisResponse(**response_100)
         )
         
-        response = client.post("/v1/cv/analyze", files=files, data=data)
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
         assert response.status_code == 200
         assert response.json()["fit_score"] == 100
 
@@ -707,6 +722,7 @@ class TestAnalyzeCVResponseSchema:
         client: TestClient,
         sample_pdf_bytes: bytes,
         sample_cv_analysis_response: dict,
+        valid_api_key_headers: dict[str, str],
     ) -> None:
         """Test that confidence is one of valid values."""
         for confidence_level in ["low", "medium", "high"]:
@@ -718,7 +734,7 @@ class TestAnalyzeCVResponseSchema:
             files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
             data = {"job_description": "Senior Python developer"}
             
-            response = client.post("/v1/cv/analyze", files=files, data=data)
+            response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
             assert response.status_code == 200
             assert response.json()["confidence"] == confidence_level
 
@@ -736,6 +752,7 @@ class TestAnalyzeCVIntegration:
         client: TestClient,
         sample_pdf_bytes: bytes,
         sample_cv_analysis_response: dict,
+        valid_api_key_headers: dict[str, str],
     ) -> None:
         """Test full analyze workflow from file upload to response."""
         mock_service.analyze = AsyncMock(
@@ -748,7 +765,7 @@ class TestAnalyzeCVIntegration:
             "job_description": "Looking for senior Python developer with 5+ years experience in FastAPI"
         }
         
-        response = client.post("/v1/cv/analyze", files=files, data=data)
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
         
         # Verify response
         assert response.status_code == 200
@@ -771,6 +788,7 @@ class TestAnalyzeCVIntegration:
         client: TestClient,
         sample_pdf_bytes: bytes,
         sample_cv_analysis_response: dict,
+        valid_api_key_headers: dict[str, str],
     ) -> None:
         """Test that service receives extracted CV text from parser."""
         mock_service.analyze = AsyncMock(
@@ -780,7 +798,7 @@ class TestAnalyzeCVIntegration:
         files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
         data = {"job_description": "Senior Python developer"}
         
-        response = client.post("/v1/cv/analyze", files=files, data=data)
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
         
         assert response.status_code == 200
         
