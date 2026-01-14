@@ -1,0 +1,29 @@
+version: '3.8'
+
+# Docker Compose configuration for running tests
+# Usage: docker compose -f docker-compose.test.yml run --rm api
+# 
+# This configuration:
+# - Sets APP_ENV=testing automatically
+# - Injects test environment variables
+# - Mounts test directory as read-only
+# - Runs pytest with proper configuration
+
+services:
+  api:
+    build: .
+    environment:
+      - PYTHONUNBUFFERED=1
+      - APP_ENV=testing
+      # LLM Configuration (test values)
+      - LLM_PROVIDER=openai
+      - LLM_MODEL=gpt-4o
+      - LLM_API_KEY=test-key-123
+      # API Configuration (test values)
+      - APP_API_KEY_REQUIRED=true
+      - APP_API_KEYS=test-api-key-123,test-api-key-456
+      # Rate Limiting (disabled for tests)
+      - RATE_LIMIT_ENABLED=false
+    volumes:
+      - ./tests:/app/tests:ro
+    command: pytest tests/ -q --tb=short
