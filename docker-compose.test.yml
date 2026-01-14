@@ -23,7 +23,7 @@ services:
       - APP_API_KEY_REQUIRED=true
       - APP_API_KEYS=test-api-key-123,test-api-key-456
       # Rate Limiting (disabled for tests)
-      - RATE_LIMIT_ENABLED=false
+      - APP_RATE_LIMIT_ENABLED=false
     volumes:
       - ./tests:/app/tests:ro
     command: pytest tests/ -q --tb=short

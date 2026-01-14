@@ -134,6 +134,25 @@ class AppSettings(BaseSettings):
         description="Comma-separated list of valid API keys for authentication",
     )
 
+    rate_limit_enabled: bool = Field(
+        True,
+        description="Enable global rate limiting per API key",
+    )
+    rate_limit_requests: int = Field(
+        10,
+        description="Maximum number of requests allowed per window (per API key)",
+        ge=1,
+    )
+    rate_limit_window_seconds: int = Field(
+        60,
+        description="Rate limit window size in seconds",
+        ge=1,
+    )
+    rate_limit_include_headers: bool = Field(
+        True,
+        description="Include X-RateLimit-* and Retry-After headers when throttling",
+    )
+
     model_config = SettingsConfigDict(
         env_prefix="APP_",
         case_sensitive=False,
