@@ -23,8 +23,9 @@ API for analyzing resumes (PDF/DOCX) against job descriptions and returning stru
 All API endpoints (except `/health`) require the `X-API-Key` header.
 
 ```bash
-# Set API keys in .env
-API_KEYS=your-secret-key-1,your-secret-key-2
+# Set API keys via environment variables (recommended)
+# or in .env.development/.env.testing depending on APP_ENV
+APP_API_KEYS=your-secret-key-1,your-secret-key-2
 
 # Make authenticated requests
 curl -X POST "http://localhost:8000/v1/cv/parse" \
@@ -32,7 +33,7 @@ curl -X POST "http://localhost:8000/v1/cv/parse" \
   -F "cv_file=@resume.pdf"
 ```
 
-For development, you can disable authentication with `API_KEY_REQUIRED=false`.
+For development, you can disable authentication with `APP_API_KEY_REQUIRED=false`.
 
 ## ⚠️ Limitations (MVP)
 - PDF must be text-based (no OCR)
@@ -43,14 +44,33 @@ For development, you can disable authentication with `API_KEY_REQUIRED=false`.
 
 ```bash
 # 1. Setup environment
-cp .env.example .env
-Edit .env: set LLM_API_KEY and API_KEYS
+cp .env.example .env.development
+# Edit .env.development: set at least LLM_* and APP_API_KEYS
+# (default APP_ENV is "development"; it loads .env.development when present)
 
 # 2. Run
 docker compose up --build
 
 # 3. Test
 curl -H "X-API-Key: your-key" http://localhost:8000/health
+```
+
+## 🧪 Rodando testes
+
+### Local (venv)
+
+```bash
+# Com a venv ativa
+python -m pytest -q
+
+# Alternativa (se o entrypoint pytest não estiver no PATH)
+./.venv/bin/python -m pytest -q
+```
+
+### Docker
+
+```bash
+docker compose -f docker-compose.test.yml run --rm api
 ```
 
 ## 📋 API Endpoints
