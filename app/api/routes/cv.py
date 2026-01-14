@@ -2,6 +2,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 
 from app.adapters.llm.factory import create_llm_client
 from app.core.auth import verify_api_key
+from app.core.rate_limit import enforce_rate_limit
 from app.core.errors import ValidationAppError, LLMAppError
 from app.schemas.analysis import CVAnalysisResponse
 from app.services.analysis_service import AnalysisService
@@ -16,7 +17,7 @@ _cache = SimpleTTLCache(ttl_seconds=3600, max_entries=1024)
 _analysis_service = AnalysisService(llm=_llm_client, cache=_cache)
 
 
-@router.post("/cv/parse", dependencies=[Depends(verify_api_key)])
+@router.post("/cv/parse", dependencies=[Depends(verify_api_key), Depends(enforce_rate_limit)])
 async def parse_cv(cv_file: UploadFile = File(...)) -> dict:
     """Parse uploaded CV file endpoint.
     
@@ -39,7 +40,11 @@ async def parse_cv(cv_file: UploadFile = File(...)) -> dict:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@router.post("/cv/analyze", response_model=CVAnalysisResponse, dependencies=[Depends(verify_api_key)])
+@router.post(
+    "/cv/analyze",
+    response_model=CVAnalysisResponse,
+    dependencies=[Depends(verify_api_key), Depends(enforce_rate_limit)],
+)
 async def analyze_cv(
     cv_file: UploadFile = File(...),
     job_description: str = Form(...),

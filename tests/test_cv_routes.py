@@ -255,6 +255,73 @@ class TestAPIKeyAuthentication:
         assert response.status_code == 403
         assert "Missing API key" in response.json()["detail"]
 
+
+# ======================== Rate Limit Tests ========================
+
+
+class TestRateLimiting:
+    """Test rate limiting on protected endpoints."""
+
+    def test_rate_limit_blocks_after_n_requests(
+        self,
+        client: TestClient,
+        sample_pdf_bytes: bytes,
+        valid_api_key_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Blocks with 429 when the global per-key limit is exceeded."""
+        from app.adapters.rate_limit.in_memory import InMemoryFixedWindowRateLimiter
+        from app.core import rate_limit as rate_limit_module
+
+        monkeypatch.setattr(rate_limit_module.settings.app, "rate_limit_enabled", True)
+        monkeypatch.setattr(rate_limit_module.settings.app, "rate_limit_include_headers", True)
+        monkeypatch.setattr(rate_limit_module.settings.app, "rate_limit_requests", 2)
+        monkeypatch.setattr(rate_limit_module.settings.app, "rate_limit_window_seconds", 60)
+
+        limiter = InMemoryFixedWindowRateLimiter(limit=2, window_seconds=60, clock=lambda: 1000.0)
+        monkeypatch.setattr(rate_limit_module, "get_rate_limiter", lambda: limiter)
+
+        files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
+
+        assert client.post("/v1/cv/parse", files=files, headers=valid_api_key_headers).status_code == 200
+        assert client.post("/v1/cv/parse", files=files, headers=valid_api_key_headers).status_code == 200
+
+        blocked = client.post("/v1/cv/parse", files=files, headers=valid_api_key_headers)
+        assert blocked.status_code == 429
+        assert "Rate limit exceeded" in blocked.json()["detail"]
+        assert "Retry-After" in blocked.headers
+        assert "X-RateLimit-Limit" in blocked.headers
+        assert "X-RateLimit-Remaining" in blocked.headers
+        assert "X-RateLimit-Reset" in blocked.headers
+
+    def test_rate_limit_is_isolated_by_api_key(
+        self,
+        client: TestClient,
+        sample_pdf_bytes: bytes,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Each API key has an independent quota."""
+        from app.adapters.rate_limit.in_memory import InMemoryFixedWindowRateLimiter
+        from app.core import rate_limit as rate_limit_module
+
+        monkeypatch.setattr(rate_limit_module.settings.app, "rate_limit_enabled", True)
+        monkeypatch.setattr(rate_limit_module.settings.app, "rate_limit_include_headers", False)
+        monkeypatch.setattr(rate_limit_module.settings.app, "rate_limit_requests", 1)
+        monkeypatch.setattr(rate_limit_module.settings.app, "rate_limit_window_seconds", 60)
+
+        limiter = InMemoryFixedWindowRateLimiter(limit=1, window_seconds=60, clock=lambda: 1000.0)
+        monkeypatch.setattr(rate_limit_module, "get_rate_limiter", lambda: limiter)
+
+        files = {"cv_file": ("resume.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
+
+        key1 = {"X-API-Key": "test-api-key-123"}
+        key2 = {"X-API-Key": "test-api-key-456"}
+
+        assert client.post("/v1/cv/parse", files=files, headers=key1).status_code == 200
+        assert client.post("/v1/cv/parse", files=files, headers=key1).status_code == 429
+
+        assert client.post("/v1/cv/parse", files=files, headers=key2).status_code == 200
+
     def test_analyze_cv_with_invalid_api_key_returns_403(
         self, client: TestClient, sample_pdf_bytes: bytes
     ) -> None:
