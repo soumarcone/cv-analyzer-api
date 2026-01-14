@@ -8,26 +8,20 @@ IMPORTANT: API Key Authentication
 - All /v1/cv/* endpoints require X-API-Key header
 - Use valid_api_key_headers fixture in tests
 - Some legacy tests may need updating to include authentication headers
+
+Configuration:
+- Environment variables are loaded from .env.testing via conftest.py
+- conftest.py sets APP_ENV=testing before any app imports
+- No need to manually set environment variables in this file
 """
 
 import io
 import json
-import os
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-
-# Set required env vars before importing settings
-# Disable .env file loading for tests
-os.environ["TESTING"] = "true"
-os.environ["LLM_PROVIDER"] = "openai"
-os.environ["LLM_MODEL"] = "gpt-4o"
-os.environ["LLM_API_KEY"] = "test-key-123"
-# For tests, we'll set up API keys but tests need to explicitly use headers
-os.environ["APP_API_KEY_REQUIRED"] = "true"
-os.environ["APP_API_KEYS"] = "test-api-key-123,test-api-key-456"
 
 from app.main import app
 from app.core.errors import ValidationAppError, LLMAppError
