@@ -8,3 +8,4 @@ README.md
 .env
 tests/
 .pytest_cache/
+ignore-me/
