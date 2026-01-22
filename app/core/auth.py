@@ -12,12 +12,16 @@ Design principles:
 
 from __future__ import annotations
 
+import hashlib
+import logging
 from typing import Annotated
 
 from fastapi import Header, HTTPException, status
 
 from app.core.config import settings
 from app.core.errors import AuthenticationAppError
+
+logger = logging.getLogger(__name__)
 
 
 def parse_api_keys(keys_string: str | None) -> set[str]:
@@ -64,6 +68,13 @@ def validate_api_key(provided_key: str) -> None:
     valid_keys = parse_api_keys(settings.app.api_keys)
     
     if not valid_keys:
+        logger.error(
+            "api_key_validation_failed",
+            extra={
+                "reason": "api_keys_not_configured",
+                "auth_required": settings.app.api_key_required,
+            },
+        )
         raise AuthenticationAppError(
             code="api_keys_not_configured",
             message="API key authentication is enabled but no valid keys are configured",
@@ -71,6 +82,15 @@ def validate_api_key(provided_key: str) -> None:
         )
     
     if provided_key not in valid_keys:
+        api_key_hash = hashlib.sha256(provided_key.encode()).hexdigest()[:16]
+        logger.warning(
+            "api_key_validation_failed",
+            extra={
+                "reason": "invalid_api_key",
+                "api_key_hash": api_key_hash,
+                "auth_required": settings.app.api_key_required,
+            },
+        )
         raise AuthenticationAppError(
             code="invalid_api_key",
             message="Invalid or missing API key",
@@ -99,9 +119,20 @@ async def verify_api_key(
     """
     if not settings.app.api_key_required:
         # Authentication disabled - early return
+        logger.debug(
+            "auth.skipped",
+            extra={"reason": "auth_required_false"},
+        )
         return
     
     if not x_api_key:
+        logger.warning(
+            "auth.missing_key",
+            extra={
+                "auth_required": True,
+                "api_key_present": False,
+            },
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Missing API key. Provide X-API-Key header.",
@@ -109,6 +140,14 @@ async def verify_api_key(
     
     try:
         validate_api_key(x_api_key)
+        logger.info(
+            "auth.success",
+            extra={
+                "auth_required": True,
+                "api_key_present": True,
+                "api_key_hash": hashlib.sha256(x_api_key.encode()).hexdigest()[:16],
+            },
+        )
     except AuthenticationAppError as exc:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
