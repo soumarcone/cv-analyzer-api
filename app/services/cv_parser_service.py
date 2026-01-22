@@ -5,12 +5,16 @@ It delegates format-specific extraction to specialized utilities while coordinat
 the overall parsing workflow.
 """
 
+import hashlib
+import logging
 from fastapi import UploadFile
 
 from app.core.config import settings
 from app.utils.docx_extractor import extract_text_from_docx_bytes
 from app.utils.pdf_extractor import extract_text_from_pdf_bytes
 from app.utils.text_normalizer import normalize_text
+
+logger = logging.getLogger(__name__)
 
 
 SUPPORTED_MIME_TYPES = {
@@ -94,32 +98,81 @@ async def parse_cv_file(cv_file: UploadFile) -> dict:
     Raises:
         ValueError: If file type is unsupported or file is empty.
     """
-    # Step 1: Validate file type
-    file_type = _validate_file_type(cv_file.content_type)
+    file_ext = None
+    if cv_file.filename:
+        file_ext = f".{cv_file.filename.split('.')[-1].lower()}"
+    
+    logger.info(
+        "parse.start",
+        extra={
+            "file_name_ext": file_ext,
+            "mime_type": cv_file.content_type,
+        },
+    )
 
-    # Step 2: Read file bytes
-    raw_bytes = await cv_file.read()
-    if not raw_bytes:
-        raise ValueError("Empty file.")
+    try:
+        # Step 1: Validate file type
+        file_type = _validate_file_type(cv_file.content_type)
 
-    # Step 3: Extract text based on file type
-    extracted_text, meta = _extract_text_by_type(raw_bytes, file_type)
+        # Step 2: Read file bytes
+        raw_bytes = await cv_file.read()
+        if not raw_bytes:
+            logger.error(
+                "parse.empty_file",
+                extra={"file_name_ext": file_ext},
+            )
+            raise ValueError("Empty file.")
 
-    # Step 4: Normalize text
-    normalized_text = normalize_text(extracted_text)
+        file_size = len(raw_bytes)
+        logger.debug(
+            "parse.bytes_read",
+            extra={"size_bytes": file_size, "file_type": file_type},
+        )
 
-    # Step 5: Build warnings based on text quality
-    warnings = _build_warnings(normalized_text)
+        # Step 3: Extract text based on file type
+        extracted_text, meta = _extract_text_by_type(raw_bytes, file_type)
 
-    # Step 6: Generate preview
-    preview = normalized_text[:settings.app.cv_preview_chars]
+        # Step 4: Normalize text
+        normalized_text = normalize_text(extracted_text)
 
-    return {
-        "file_name": cv_file.filename,
-        "file_type": file_type,
-        "char_count": len(normalized_text),
-        "preview": preview,
-        "text": normalized_text,
-        "warnings": warnings,
-        "meta": meta,
-    }
+        # Step 5: Build warnings based on text quality
+        warnings = _build_warnings(normalized_text)
+
+        # Step 6: Generate preview
+        preview = normalized_text[:settings.app.cv_preview_chars]
+
+        text_hash = hashlib.sha256(normalized_text.encode()).hexdigest()[:16]
+        char_count = len(normalized_text)
+
+        logger.info(
+            "parse.success",
+            extra={
+                "file_type": file_type,
+                "size_bytes": file_size,
+                "char_count": char_count,
+                "preview_len": len(preview),
+                "cv_text_hash": text_hash,
+                "warnings_count": len(warnings),
+                "meta": meta,
+            },
+        )
+
+        return {
+            "file_name": cv_file.filename,
+            "file_type": file_type,
+            "char_count": char_count,
+            "preview": preview,
+            "text": normalized_text,
+            "warnings": warnings,
+            "meta": meta,
+        }
+
+    except ValueError as e:
+        logger.error(
+            "parse.validation_error",
+            extra={
+                "error_msg": str(e),
+                "file_type": cv_file.content_type,
+            },
+        )
+        raise
