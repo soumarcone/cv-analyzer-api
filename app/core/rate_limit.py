@@ -15,6 +15,8 @@ Rate limiting strategy (MVP):
 
 from __future__ import annotations
 
+import hashlib
+import logging
 from typing import Annotated
 
 from fastapi import Header, HTTPException, Request, status
@@ -22,6 +24,8 @@ from fastapi import Header, HTTPException, Request, status
 from app.adapters.rate_limit.base import AbstractRateLimiter
 from app.adapters.rate_limit.in_memory import InMemoryFixedWindowRateLimiter
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 _limiter: AbstractRateLimiter | None = None
@@ -73,6 +77,11 @@ def _build_rate_limit_key(request: Request, x_api_key: str | None) -> str:
     return f"ip:{client_host}"
 
 
+def _hash_limiter_key(key: str) -> str:
+    """Hash the rate limit key for logging without exposing secrets."""
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
 async def enforce_rate_limit(
     request: Request,
     x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
@@ -95,14 +104,39 @@ async def enforce_rate_limit(
 
     limiter = get_rate_limiter()
     key = _build_rate_limit_key(request, x_api_key)
+    key_hash = _hash_limiter_key(key)
+    key_type = "api_key" if x_api_key else "ip"
 
     result = limiter.consume(key)
     if result.allowed:
+        logger.info(
+            "rate_limit.allowed",
+            extra={
+                "key_type": key_type,
+                "key_hash": key_hash,
+                "limit": result.limit,
+                "remaining": result.remaining,
+                "window_s": settings.app.rate_limit_window_seconds,
+            },
+        )
         return
+
+    retry_after = result.retry_after_seconds or 0
+    logger.warning(
+        "rate_limit.exceeded",
+        extra={
+            "key_type": key_type,
+            "key_hash": key_hash,
+            "limit": result.limit,
+            "remaining": result.remaining,
+            "window_s": settings.app.rate_limit_window_seconds,
+            "retry_after_s": retry_after,
+        },
+    )
 
     headers: dict[str, str] = {}
     if settings.app.rate_limit_include_headers:
-        headers["Retry-After"] = str(result.retry_after_seconds or 0)
+        headers["Retry-After"] = str(retry_after)
         headers["X-RateLimit-Limit"] = str(result.limit)
         headers["X-RateLimit-Remaining"] = str(result.remaining)
         headers["X-RateLimit-Reset"] = str(result.reset_at)
