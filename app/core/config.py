@@ -64,6 +64,15 @@ def _build_app_settings() -> "AppSettings":
     return AppSettings()  # type: ignore[call-arg]
 
 
+def _build_log_settings() -> "LogSettings":
+    """Build log settings from environment.
+
+    Separating construction keeps BaseSettings consistent across sections.
+    """
+
+    return LogSettings()  # type: ignore[call-arg]
+
+
 class LLMSettings(BaseSettings):
     """LLM provider configuration.
     
@@ -159,6 +168,48 @@ class AppSettings(BaseSettings):
     )
 
 
+class LogSettings(BaseSettings):
+    """Logging configuration."""
+
+    level: str = Field(
+        "info",
+        description="Logging level (debug, info, warning, error)",
+    )
+    format: str = Field(
+        "json",
+        description="Log format (json or plain)",
+    )
+    output: str = Field(
+        "stdout",
+        description="Log output target (stdout or file)",
+    )
+    file_path: str | None = Field(
+        None,
+        description="File path when output=file",
+    )
+    max_bytes: int | None = Field(
+        10 * 1024 * 1024,
+        description="Max bytes before rotating (file output). None disables rotation",
+    )
+    backup_count: int = Field(
+        5,
+        description="Number of rotated log files to keep",
+    )
+    retention_days: int = Field(
+        7,
+        description="Retention hint (for external log processors)",
+    )
+    request_id_header: str = Field(
+        "X-Request-ID",
+        description="Header name for incoming/outgoing request id",
+    )
+
+    model_config = SettingsConfigDict(
+        env_prefix="LOG_",
+        case_sensitive=False,
+    )
+
+
 class Settings(BaseSettings):
     """Main application settings container.
     
@@ -175,6 +226,7 @@ class Settings(BaseSettings):
     app_env: str = APP_ENV
     llm: LLMSettings = Field(default_factory=_build_llm_settings)
     app: AppSettings = Field(default_factory=_build_app_settings)
+    log: LogSettings = Field(default_factory=_build_log_settings)
 
     model_config = SettingsConfigDict(
         case_sensitive=False,
