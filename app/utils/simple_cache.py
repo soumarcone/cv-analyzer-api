@@ -6,6 +6,7 @@ for Redis while keeping the same interface and behaviors.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections import OrderedDict
@@ -14,6 +15,8 @@ from hashlib import sha256
 from typing import Any
 
 from app.schemas.analysis import CVAnalysisResponse
+
+logger = logging.getLogger(__name__)
 
 
 AnalysisValue = CVAnalysisResponse | dict[str, Any]
@@ -65,15 +68,35 @@ class SimpleTTLCache:
             item = self._store.get(key)
             if not item:
                 self._misses += 1
+                logger.debug(
+                    "cache.miss",
+                    extra={
+                        "cache_key": key[:16],
+                        "reason": "not_found",
+                    },
+                )
                 return None
 
             if self._is_expired(item):
                 self._evict_single(key)
                 self._misses += 1
+                logger.debug(
+                    "cache.miss",
+                    extra={
+                        "cache_key": key[:16],
+                        "reason": "expired",
+                    },
+                )
                 return None
 
             self._hits += 1
             self._store.move_to_end(key)  # mark as recently used
+            logger.debug(
+                "cache.hit",
+                extra={
+                    "cache_key": key[:16],
+                },
+            )
             return item.value
 
     def set(self, key: str, value: AnalysisValue) -> None:
@@ -89,6 +112,15 @@ class SimpleTTLCache:
             self._store[key] = CacheItem(value=value, expires_at=time.time() + self._ttl)
             self._store.move_to_end(key)
             self._evict_if_over_capacity_locked()
+
+            logger.debug(
+                "cache.set",
+                extra={
+                    "cache_key": key[:16],
+                    "size": len(self._store),
+                    "ttl_s": self._ttl,
+                },
+            )
 
     def clear(self) -> None:
         """Remove all cached entries and reset counters."""
