@@ -204,7 +204,7 @@ class TestAnalysisServicePrepareInputs:
         assert "truncated" in warnings[0]
 
     def test_prepare_inputs_both_truncated(self) -> None:
-        """Test that both inputs can be truncated with single warning."""
+        """Test that both inputs can be truncated with separate warnings."""
         mock_llm = MagicMock()
         mock_cache = MagicMock()
         service = AnalysisService(llm=mock_llm, cache=mock_cache)
@@ -217,7 +217,9 @@ class TestAnalysisServicePrepareInputs:
 
         assert len(result_cv) == 50000
         assert len(result_job) == 10000
-        assert len(warnings) == 1
+        assert len(warnings) == 2
+        assert "CV was truncated" in warnings[0]
+        assert "Job description was truncated" in warnings[1]
 
 
 class TestAnalysisServiceCache:
