@@ -1,11 +1,15 @@
 """OpenAI LLM client adapter."""
 
 import json
+import logging
+import time
 from typing import Any
 
 from openai import AsyncOpenAI
 
 from app.adapters.llm.base import AbstractLLMClient
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIClient(AbstractLLMClient):
@@ -91,22 +95,80 @@ class OpenAIClient(AbstractLLMClient):
             if param in kwargs:
                 request_params[param] = kwargs[param]
 
+        logger.info(
+            "llm.call_start",
+            extra={
+                "provider": "openai",
+                "model": self.model,
+                "prompt_chars": len(prompt),
+                "schema_version": "json_schema" if schema else "none",
+                "max_tokens": request_params.get("max_tokens"),
+            },
+        )
+
+        start_time = time.perf_counter()
+
         try:
             response = await self.client.chat.completions.create(**request_params)
             content = response.choices[0].message.content
             
             if content is None:
+                logger.error(
+                    "llm.call_failed",
+                    extra={
+                        "provider": "openai",
+                        "model": self.model,
+                        "error_code": "empty_response",
+                    },
+                )
                 raise RuntimeError("LLM returned empty response")
             
             content = content.strip()
-            
+            latency_ms = (time.perf_counter() - start_time) * 1000
+
         except Exception as exc:
+            latency_ms = (time.perf_counter() - start_time) * 1000
+            logger.error(
+                "llm.call_failed",
+                extra={
+                    "provider": "openai",
+                    "model": self.model,
+                    "error_type": type(exc).__name__,
+                    "latency_ms": latency_ms,
+                    "error_code": "api_error",
+                },
+            )
             raise RuntimeError(f"OpenAI API error: {str(exc)}") from exc
 
         # Parse and validate JSON
         try:
-            return json.loads(content)
+            result = json.loads(content)
+            latency_ms = (time.perf_counter() - start_time) * 1000
+
+            logger.info(
+                "llm.call_success",
+                extra={
+                    "provider": "openai",
+                    "model": self.model,
+                    "latency_ms": latency_ms,
+                    "response_size": len(content),
+                    "status": "success",
+                },
+            )
+
+            return result
+
         except json.JSONDecodeError as exc:
+            latency_ms = (time.perf_counter() - start_time) * 1000
+            logger.error(
+                "llm.call_failed",
+                extra={
+                    "provider": "openai",
+                    "model": self.model,
+                    "error_code": "invalid_json",
+                    "latency_ms": latency_ms,
+                },
+            )
             raise RuntimeError(
                 f"LLM returned invalid JSON: {str(exc)}; "
                 "consider using stricter prompts or schema enforcement"
