@@ -10,6 +10,7 @@ text into structured, validated analysis results. It handles:
 """
 
 import hashlib
+import logging
 from typing import Any
 
 from app.adapters.llm.base import AbstractLLMClient
@@ -17,6 +18,8 @@ from app.core.config import settings
 from app.core.errors import ValidationAppError
 from app.schemas.analysis import CVAnalysisResponse
 from app.utils.simple_cache import SimpleTTLCache
+
+logger = logging.getLogger(__name__)
 
 # Prompt version for cache invalidation when prompt changes
 PROMPT_VERSION = "v1"
@@ -150,6 +153,13 @@ class AnalysisService:
             ValidationAppError: If inputs are too short or empty.
         """
         if not cv_text or len(cv_text.strip()) < settings.app.min_cv_chars:
+            logger.warning(
+                "analyze.cv_too_short",
+                extra={
+                    "min_chars": settings.app.min_cv_chars,
+                    "actual": len(cv_text.strip()) if cv_text else 0,
+                },
+            )
             raise ValidationAppError(
                 code="cv_text_too_short",
                 message="CV text is too short. PDF may be image-based (OCR not supported in MVP).",
@@ -160,6 +170,13 @@ class AnalysisService:
             )
 
         if not job_text or len(job_text.strip()) < 50:
+            logger.warning(
+                "analyze.job_too_short",
+                extra={
+                    "min_chars": 50,
+                    "actual": len(job_text.strip()) if job_text else 0,
+                },
+            )
             raise ValidationAppError(
                 code="job_text_too_short",
                 message="Job description is too short (minimum 50 characters).",
@@ -185,8 +202,19 @@ class AnalysisService:
         cv_text, cv_truncated = _truncate(cv_text, settings.app.max_cv_chars)
         job_text, job_truncated = _truncate(job_text, settings.app.max_job_desc_chars)
 
-        if cv_truncated or job_truncated:
-            warnings.append("Input was truncated to fit model limits.")
+        if cv_truncated:
+            logger.warning(
+                "analyze.cv_truncated",
+                extra={"max_chars": settings.app.max_cv_chars},
+            )
+            warnings.append("CV was truncated to fit model limits.")
+
+        if job_truncated:
+            logger.warning(
+                "analyze.job_truncated",
+                extra={"max_chars": settings.app.max_job_desc_chars},
+            )
+            warnings.append("Job description was truncated to fit model limits.")
 
         return cv_text, job_text
 
@@ -202,7 +230,16 @@ class AnalysisService:
         cached_result = self.cache.get(cache_key)
 
         if not cached_result:
+            logger.debug(
+                "analyze.cache_miss",
+                extra={"cache_key": cache_key},
+            )
             return None
+
+        logger.info(
+            "analyze.cache_hit",
+            extra={"cache_key": cache_key},
+        )
 
         # Handle both dict and CVAnalysisResponse instances
         if isinstance(cached_result, dict):
@@ -231,10 +268,28 @@ class AnalysisService:
         Raises:
             LLMAppError: If LLM call fails or returns invalid JSON.
         """
+        logger.info(
+            "analyze.llm_call_start",
+            extra={
+                "cv_char_count": len(cv_text),
+                "job_char_count": len(job_text),
+                "provider": settings.llm.provider,
+                "model": settings.llm.model,
+            },
+        )
+
         prompt = build_prompt(cv_text, job_text)
         schema: dict[str, Any] = CVAnalysisResponse.model_json_schema()
 
         raw_response = await self.llm.generate_json(prompt, schema=schema)
+
+        logger.info(
+            "analyze.llm_call_success",
+            extra={
+                "fit_score": raw_response.get("fit_score"),
+                "confidence": raw_response.get("confidence"),
+            },
+        )
 
         return CVAnalysisResponse.model_validate({
             **raw_response,
@@ -266,23 +321,63 @@ class AnalysisService:
         """
         warnings = warnings or []
 
-        # Step 1: Validate inputs
-        self._validate_inputs(cv_text, job_text)
+        cv_hash = hashlib.sha256(cv_text.encode()).hexdigest()[:16]
+        job_hash = hashlib.sha256(job_text.encode()).hexdigest()[:16]
 
-        # Step 2: Prepare inputs (truncate if needed)
-        cv_text, job_text = self._prepare_inputs(cv_text, job_text, warnings)
+        logger.info(
+            "analyze.start",
+            extra={
+                "cv_char_count": len(cv_text),
+                "job_char_count": len(job_text),
+                "cv_text_hash": cv_hash,
+                "job_text_hash": job_hash,
+            },
+        )
 
-        # Step 3: Check cache
-        cache_key = _hash_inputs(cv_text, job_text)
-        cached_analysis = self._get_from_cache(cache_key)
+        try:
+            # Step 1: Validate inputs
+            self._validate_inputs(cv_text, job_text)
 
-        if cached_analysis:
-            return cached_analysis
+            # Step 2: Prepare inputs (truncate if needed)
+            cv_text, job_text = self._prepare_inputs(cv_text, job_text, warnings)
 
-        # Step 4: Generate fresh analysis via LLM
-        analysis = await self._generate_analysis(cv_text, job_text, warnings)
+            # Step 3: Check cache
+            cache_key = _hash_inputs(cv_text, job_text)
+            cached_analysis = self._get_from_cache(cache_key)
 
-        # Step 5: Cache the result
-        self.cache.set(cache_key, analysis.model_dump())
+            if cached_analysis:
+                logger.info(
+                    "analyze.cache_used",
+                    extra={
+                        "cache_key": cache_key,
+                        "fit_score": cached_analysis.fit_score,
+                    },
+                )
+                return cached_analysis
 
-        return analysis
+            # Step 4: Generate fresh analysis via LLM
+            analysis = await self._generate_analysis(cv_text, job_text, warnings)
+
+            # Step 5: Cache the result
+            self.cache.set(cache_key, analysis.model_dump())
+
+            logger.info(
+                "analyze.complete",
+                extra={
+                    "fit_score": analysis.fit_score,
+                    "confidence": analysis.confidence,
+                    "cached": False,
+                },
+            )
+
+            return analysis
+
+        except Exception as e:
+            logger.error(
+                "analyze.failed",
+                extra={
+                    "error_type": type(e).__name__,
+                    "error_msg": str(e),
+                },
+            )
+            raise
