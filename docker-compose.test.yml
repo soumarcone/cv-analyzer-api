@@ -22,6 +22,7 @@ services:
       # API Configuration (test values)
       - APP_API_KEY_REQUIRED=true
       - APP_API_KEYS=test-api-key-123,test-api-key-456
+      - APP_MAX_UPLOAD_SIZE_MB=1
       # Rate Limiting (disabled for tests)
       - APP_RATE_LIMIT_ENABLED=false
     volumes:

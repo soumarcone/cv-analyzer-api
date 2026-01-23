@@ -21,7 +21,10 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
+
+from app.core.config import settings
 
 from app.main import app
 from app.core.errors import ValidationAppError, LLMAppError
@@ -396,6 +399,46 @@ class TestParseCVEndpoint:
         assert "text" in result
         assert "meta" in result
 
+    def test_parse_cv_file_too_large(
+        self,
+        client: TestClient,
+        sample_pdf_bytes: bytes,
+        valid_api_key_headers: dict[str, str],
+    ) -> None:
+        """Reject files exceeding configured size limit with 413.
+        
+        Note: TestClient has limitations with chunked reading. Real HTTP
+        validation is tested in test_file_size_integration.py.
+        This test validates the error path when size check is triggered.
+        """
+        # Create file larger than limit (1MB in .env.testing)
+        max_bytes = settings.app.max_upload_size_mb * 1024 * 1024
+        oversized_pdf = sample_pdf_bytes + (b" " * (max_bytes + 1))
+        
+        files = {"cv_file": ("resume.pdf", io.BytesIO(oversized_pdf), "application/pdf")}
+
+        response = client.post("/v1/cv/parse", files=files, headers=valid_api_key_headers)
+
+        assert response.status_code == 413
+        assert "File too large" in response.json()["detail"]
+
+    def test_parse_cv_file_exactly_max_size(
+        self,
+        client: TestClient,
+        sample_pdf_bytes: bytes,
+        valid_api_key_headers: dict[str, str],
+    ) -> None:
+        """Accept files exactly at the configured size limit."""
+        # File exactly at limit should be accepted
+        max_bytes = settings.app.max_upload_size_mb * 1024 * 1024
+        sized_pdf = sample_pdf_bytes + (b" " * max(0, max_bytes - len(sample_pdf_bytes)))
+        
+        files = {"cv_file": ("resume.pdf", io.BytesIO(sized_pdf), "application/pdf")}
+
+        response = client.post("/v1/cv/parse", files=files, headers=valid_api_key_headers)
+
+        assert response.status_code == 200
+
     def test_parse_cv_unsupported_file_type(self, client: TestClient, valid_api_key_headers: dict[str, str]) -> None:
         """Test that unsupported file types are rejected."""
         files = {"cv_file": ("resume.txt", io.BytesIO(b"Plain text"), "text/plain")}
@@ -443,6 +486,54 @@ class TestAnalyzeCVEndpoint:
     Note: All tests in this class require authentication via X-API-Key header.
     Tests use the valid_api_key_headers fixture to provide authentication.
     """
+
+    def test_analyze_cv_file_too_large(
+        self,
+        client: TestClient,
+        sample_pdf_bytes: bytes,
+        valid_api_key_headers: dict[str, str],
+    ) -> None:
+        """Reject oversized files before analysis begins.
+        
+        Note: TestClient has limitations with chunked reading. Real HTTP
+        validation is tested in test_file_size_integration.py.
+        This test validates the error path when size check is triggered.
+        """
+        max_bytes = settings.app.max_upload_size_mb * 1024 * 1024
+        oversized_pdf = sample_pdf_bytes + (b" " * (max_bytes + 1))
+        
+        files = {"cv_file": ("resume.pdf", io.BytesIO(oversized_pdf), "application/pdf")}
+        data = {"job_description": "Senior Python developer"}
+
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
+
+        assert response.status_code == 413
+        assert "File too large" in response.json()["detail"]
+
+    @patch("app.api.routes.cv._analysis_service")
+    def test_analyze_cv_file_exactly_max_size(
+        self,
+        mock_service: MagicMock,
+        client: TestClient,
+        sample_pdf_bytes: bytes,
+        sample_cv_analysis_response: dict,
+        valid_api_key_headers: dict[str, str],
+    ) -> None:
+        """Accept files exactly at the configured size limit and proceed to analysis."""
+        max_bytes = settings.app.max_upload_size_mb * 1024 * 1024
+        sized_pdf = sample_pdf_bytes + (b" " * max(0, max_bytes - len(sample_pdf_bytes)))
+        
+        mock_service.analyze = AsyncMock(
+            return_value=CVAnalysisResponse(**sample_cv_analysis_response)
+        )
+
+        files = {"cv_file": ("resume.pdf", io.BytesIO(sized_pdf), "application/pdf")}
+        data = {"job_description": "Senior Python developer"}
+
+        response = client.post("/v1/cv/analyze", files=files, data=data, headers=valid_api_key_headers)
+
+        assert response.status_code == 200
+        assert response.json()["fit_score"] == sample_cv_analysis_response["fit_score"]
 
     @patch("app.api.routes.cv._analysis_service")
     def test_analyze_cv_success(

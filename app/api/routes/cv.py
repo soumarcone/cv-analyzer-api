@@ -4,6 +4,7 @@ from app.adapters.llm.factory import create_llm_client
 from app.core.auth import verify_api_key
 from app.core.rate_limit import enforce_rate_limit
 from app.core.errors import ValidationAppError, LLMAppError
+from app.core.file_validation import read_upload_file_limited
 from app.schemas.analysis import CVAnalysisResponse
 from app.services.analysis_service import AnalysisService
 from app.services.cv_parser_service import parse_cv_file
@@ -34,10 +35,14 @@ async def parse_cv(cv_file: UploadFile = File(...)) -> dict:
         HTTPException: 400 error if file type is invalid or file is empty.
     """
     try:
-        result = await parse_cv_file(cv_file)
+        file_bytes = await read_upload_file_limited(cv_file)
+        result = await parse_cv_file(cv_file, file_bytes=file_bytes)
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except HTTPException:
+        # Propagate HTTP errors (e.g., size limit) directly
+        raise
 
 
 @router.post(
@@ -68,9 +73,12 @@ async def analyze_cv(
     """
     # Step 1: Parse CV file and extract text
     try:
-        parsed_cv = await parse_cv_file(cv_file)
+        file_bytes = await read_upload_file_limited(cv_file)
+        parsed_cv = await parse_cv_file(cv_file, file_bytes=file_bytes)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except HTTPException:
+        raise
     
     # Step 2: Analyze CV against job description
     try:

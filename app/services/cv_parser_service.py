@@ -7,6 +7,7 @@ the overall parsing workflow.
 
 import hashlib
 import logging
+from typing import Optional
 from fastapi import UploadFile
 
 from app.core.config import settings
@@ -76,7 +77,7 @@ def _build_warnings(normalized_text: str) -> list[str]:
     return warnings
 
 
-async def parse_cv_file(cv_file: UploadFile) -> dict:
+async def parse_cv_file(cv_file: UploadFile, file_bytes: Optional[bytes] = None) -> dict:
     """Parse uploaded CV file and extract text content.
 
     Orchestrates the CV parsing workflow: validation, extraction, normalization,
@@ -114,8 +115,8 @@ async def parse_cv_file(cv_file: UploadFile) -> dict:
         # Step 1: Validate file type
         file_type = _validate_file_type(cv_file.content_type)
 
-        # Step 2: Read file bytes
-        raw_bytes = await cv_file.read()
+        # Step 2: Read file bytes (validated in route when provided)
+        raw_bytes = file_bytes if file_bytes is not None else await cv_file.read()
         if not raw_bytes:
             logger.error(
                 "parse.empty_file",
