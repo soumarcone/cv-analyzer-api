@@ -218,6 +218,110 @@ class AnalysisService:
 
         return cv_text, job_text
 
+    async def _validate_cv_semantic_content(self, cv_text: str) -> None:
+        """Validate if text content appears to be a valid CV using LLM.
+
+        Uses LLM to analyze if the text has characteristics of a CV:
+        - Professional experience
+        - Education
+        - Skills
+        - Contact information
+
+        Args:
+            cv_text: Extracted CV text to validate.
+
+        Raises:
+            ValidationAppError: If content doesn't appear to be a valid CV.
+        """
+        if not settings.app.enable_semantic_validation:
+            logger.debug("analyze.semantic_validation_disabled")
+            return
+
+        # Use first 2000 chars for validation (enough to detect CV structure)
+        sample = cv_text[:2000]
+
+        validation_prompt = f"""You are a CV/resume validator. Analyze if the following text is a valid resume/CV.
+
+A valid CV should contain at least 2 of these elements:
+- Professional experience or work history
+- Education or academic background
+- Skills or competencies
+- Contact information or personal details
+
+Return ONLY a JSON object with this structure:
+{{
+  "is_valid_cv": true or false,
+  "confidence": 0.0 to 1.0,
+  "reason": "brief explanation of your decision",
+  "detected_elements": ["element1", "element2"]
+}}
+
+Text to analyze:
+{sample}
+
+Return only the JSON object, no additional text."""
+
+        validation_schema = {
+            "type": "object",
+            "properties": {
+                "is_valid_cv": {"type": "boolean"},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "reason": {"type": "string"},
+                "detected_elements": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["is_valid_cv", "confidence", "reason"],
+        }
+
+        try:
+            result = await self.llm.generate_json(validation_prompt, schema=validation_schema)
+
+            required_fields = ("is_valid_cv", "confidence", "reason")
+
+            if not all(field in result for field in required_fields):
+                logger.warning(
+                    "analyze.cv_validation_incomplete",
+                    extra={"received_keys": list(result.keys()) if hasattr(result, "keys") else "unknown"},
+                )
+                return
+
+            if not isinstance(result.get("is_valid_cv"), bool) or not isinstance(
+                result.get("confidence"), (int, float),
+            ):
+                logger.warning(
+                    "analyze.cv_validation_unexpected_types",
+                    extra={
+                        "is_valid_cv_type": type(result.get("is_valid_cv")).__name__,
+                        "confidence_type": type(result.get("confidence")).__name__,
+                    },
+                )
+                return
+
+            logger.info(
+                "analyze.cv_validation_result",
+                extra={
+                    "is_valid_cv": result.get("is_valid_cv"),
+                    "confidence": result.get("confidence"),
+                    "reason": result.get("reason"),
+                    "detected_elements": result.get("detected_elements"),
+                },
+            )
+
+            if not result.get("is_valid_cv") or result.get("confidence", 0) < 0.7:
+                raise ValidationAppError(
+                    code="invalid_cv_content",
+                    message=f"Document doesn't appear to be a valid CV/resume. {result.get('reason', 'Unknown reason')}",
+                    details={"validation_result": result},
+                )
+
+        except ValidationAppError:
+            raise
+        except Exception as e:
+            # Log but don't block on validation errors - fail open for now
+            logger.warning(
+                "analyze.cv_validation_failed",
+                extra={"error": str(e)},
+            )
+
     def _get_from_cache(self, cache_key: str) -> CVAnalysisResponse | None:
         """Retrieve analysis from cache if available.
 
@@ -341,7 +445,7 @@ class AnalysisService:
             # Step 2: Prepare inputs (truncate if needed)
             cv_text, job_text = self._prepare_inputs(cv_text, job_text, warnings)
 
-            # Step 3: Check cache
+            # Step 3: Check cache before running semantic validation (validated once when first generated)
             cache_key = _hash_inputs(cv_text, job_text)
             cached_analysis = self._get_from_cache(cache_key)
 
@@ -355,10 +459,13 @@ class AnalysisService:
                 )
                 return cached_analysis
 
-            # Step 4: Generate fresh analysis via LLM
+            # Step 4: Validate CV semantic content using LLM (only for cache miss)
+            await self._validate_cv_semantic_content(cv_text)
+
+            # Step 5: Generate fresh analysis via LLM
             analysis = await self._generate_analysis(cv_text, job_text, warnings)
 
-            # Step 5: Cache the result
+            # Step 6: Cache the result
             self.cache.set(cache_key, analysis.model_dump())
 
             logger.info(

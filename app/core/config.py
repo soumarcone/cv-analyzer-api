@@ -146,6 +146,10 @@ class AppSettings(BaseSettings):
         10,
         description="Timeout for file extraction operations (PDF/DOCX)",
     )
+    enable_semantic_validation: bool = Field(
+        True,
+        description="Enable LLM-based semantic validation of CV and job description content",
+    )
     api_key_required: bool = Field(
         True,
         description="Whether API key authentication is required",
