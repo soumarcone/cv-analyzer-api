@@ -5,15 +5,23 @@ It delegates format-specific extraction to specialized utilities while coordinat
 the overall parsing workflow.
 """
 
+from __future__ import annotations
+
 import hashlib
 import logging
-from typing import Optional
+from typing import Optional, Tuple, cast
 from fastapi import UploadFile
 
 from app.core.config import settings
 from app.utils.docx_extractor import extract_text_from_docx_bytes
 from app.utils.pdf_extractor import extract_text_from_pdf_bytes
 from app.utils.text_normalizer import normalize_text
+from app.utils.file_validators import (
+    validate_file_signature,
+    get_file_type_from_mime,
+    validate_zip_safety,
+    FileType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +51,35 @@ def _validate_file_type(content_type: str | None) -> str:
     return SUPPORTED_MIME_TYPES[content_type]
 
 
-def _extract_text_by_type(raw_bytes: bytes, file_type: str) -> tuple[str, dict]:
+def _validate_file_signature(raw_bytes: bytes, file_type: str) -> None:
+    """Validate file magic numbers to prevent MIME type spoofing.
+
+    Checks that the binary signature matches the declared file type.
+    This prevents attacks where malicious executables are renamed as PDFs/DOCXs.
+
+    Args:
+        raw_bytes: Raw file content.
+        file_type: Expected file type ('pdf' or 'docx').
+
+    Raises:
+        ValueError: If file signature doesn't match declared type.
+    """
+    if not validate_file_signature(raw_bytes, cast(FileType, file_type)):
+        logger.warning(
+            "parse.invalid_signature",
+            extra={"expected_type": file_type},
+        )
+        raise ValueError(
+            f"File signature doesn't match declared type. Expected {file_type.upper()}."
+        )
+
+    logger.debug(
+        "parse.signature_validated",
+        extra={"file_type": file_type},
+    )
+
+
+def _extract_text_by_type(raw_bytes: bytes, file_type: str) -> Tuple[str, dict]:
     """Extract text from file bytes based on type.
 
     Args:
@@ -130,8 +166,30 @@ async def parse_cv_file(cv_file: UploadFile, file_bytes: Optional[bytes] = None)
             extra={"size_bytes": file_size, "file_type": file_type},
         )
 
-        # Step 3: Extract text based on file type
-        extracted_text, meta = _extract_text_by_type(raw_bytes, file_type)
+        # Step 3: Validate file signature (magic numbers)
+        _validate_file_signature(raw_bytes, file_type)
+
+        # Step 4: Validate ZIP safety for DOCX files
+        if file_type == "docx":
+            try:
+                validate_zip_safety(raw_bytes)
+            except ValueError as exc:
+                logger.warning(
+                    "parse.zip_validation_failed",
+                    extra={"error": str(exc)},
+                )
+                raise ValueError(f"ZIP validation failed: {str(exc)}") from exc
+
+        # Step 5: Extract text based on file type
+        try:
+            extracted_text, meta = _extract_text_by_type(raw_bytes, file_type)
+        except ValueError as exc:
+            # Handle page/paragraph limit errors from extractors
+            logger.warning(
+                "parse.file_too_complex",
+                extra={"error": str(exc), "file_type": file_type},
+            )
+            raise ValueError(str(exc)) from exc
 
         # Step 4: Normalize text
         normalized_text = normalize_text(extracted_text)

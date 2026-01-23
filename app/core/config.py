@@ -134,6 +134,14 @@ class AppSettings(BaseSettings):
         800,
         description="Number of characters to include in CV preview",
     )
+    max_pdf_pages: int = Field(
+        50,
+        description="Maximum number of pages allowed in PDF files",
+    )
+    max_docx_paragraphs: int = Field(
+        500,
+        description="Maximum number of paragraphs allowed in DOCX files",
+    )
     api_key_required: bool = Field(
         True,
         description="Whether API key authentication is required",

@@ -439,6 +439,46 @@ class TestParseCVEndpoint:
 
         assert response.status_code == 200
 
+    def test_parse_cv_spoofed_mime_type_executable(
+        self, client: TestClient, valid_api_key_headers: dict[str, str]
+    ) -> None:
+        """Test that files with spoofed MIME type (executable as PDF) are rejected."""
+        # Windows PE executable signature
+        exe_content = b"MZ\x90\x00" + b"malicious content"
+        
+        files = {"cv_file": ("resume.pdf", io.BytesIO(exe_content), "application/pdf")}
+        
+        response = client.post("/v1/cv/parse", files=files, headers=valid_api_key_headers)
+        
+        assert response.status_code == 400
+        assert "File signature doesn't match" in response.json()["detail"]
+
+    def test_parse_cv_spoofed_mime_type_text_as_pdf(
+        self, client: TestClient, valid_api_key_headers: dict[str, str]
+    ) -> None:
+        """Test that plain text file spoofed as PDF is rejected."""
+        text_content = b"This is just plain text, not a PDF"
+        
+        files = {"cv_file": ("resume.pdf", io.BytesIO(text_content), "application/pdf")}
+        
+        response = client.post("/v1/cv/parse", files=files, headers=valid_api_key_headers)
+        
+        assert response.status_code == 400
+        assert "File signature doesn't match" in response.json()["detail"]
+
+    def test_parse_cv_spoofed_mime_type_pdf_as_docx(
+        self, client: TestClient, sample_pdf_bytes: bytes, valid_api_key_headers: dict[str, str]
+    ) -> None:
+        """Test that PDF file spoofed as DOCX is rejected."""
+        # Send PDF content but claim it's DOCX
+        files = {"cv_file": ("resume.docx", io.BytesIO(sample_pdf_bytes), 
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+        
+        response = client.post("/v1/cv/parse", files=files, headers=valid_api_key_headers)
+        
+        assert response.status_code == 400
+        assert "File signature doesn't match" in response.json()["detail"]
+
     def test_parse_cv_unsupported_file_type(self, client: TestClient, valid_api_key_headers: dict[str, str]) -> None:
         """Test that unsupported file types are rejected."""
         files = {"cv_file": ("resume.txt", io.BytesIO(b"Plain text"), "text/plain")}
