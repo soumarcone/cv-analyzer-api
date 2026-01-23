@@ -7,6 +7,7 @@ the overall parsing workflow.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from typing import Optional, Tuple, cast
@@ -92,6 +93,42 @@ def _extract_text_by_type(raw_bytes: bytes, file_type: str) -> Tuple[str, dict]:
     if file_type == "pdf":
         return extract_text_from_pdf_bytes(raw_bytes)
     return extract_text_from_docx_bytes(raw_bytes)
+
+
+async def _extract_text_with_timeout(raw_bytes: bytes, file_type: str) -> Tuple[str, dict]:
+    """Extract text from file bytes with timeout protection.
+
+    Prevents extraction operations from hanging indefinitely on malformed files.
+    Runs synchronous extraction in thread pool with asyncio timeout.
+
+    Args:
+        raw_bytes: Raw file bytes.
+        file_type: File type ('pdf' or 'docx').
+
+    Returns:
+        tuple: (extracted_text, metadata_dict)
+
+    Raises:
+        asyncio.TimeoutError: If extraction exceeds configured timeout.
+        ValueError: If extraction fails (file too complex, etc).
+    """
+    loop = asyncio.get_event_loop()
+    timeout_seconds = settings.app.file_extraction_timeout_seconds
+    
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, _extract_text_by_type, raw_bytes, file_type),
+            timeout=timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "parse.extraction_timeout",
+            extra={
+                "file_type": file_type,
+                "timeout_seconds": timeout_seconds,
+            },
+        )
+        raise
 
 
 def _build_warnings(normalized_text: str) -> list[str]:
@@ -182,7 +219,19 @@ async def parse_cv_file(cv_file: UploadFile, file_bytes: Optional[bytes] = None)
 
         # Step 5: Extract text based on file type
         try:
-            extracted_text, meta = _extract_text_by_type(raw_bytes, file_type)
+            extracted_text, meta = await _extract_text_with_timeout(raw_bytes, file_type)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "parse.extraction_timeout",
+                extra={
+                    "file_type": file_type,
+                    "timeout_seconds": settings.app.file_extraction_timeout_seconds,
+                },
+            )
+            raise ValueError(
+                f"File extraction took too long (timeout: {settings.app.file_extraction_timeout_seconds}s). "
+                "File may be corrupted or too complex."
+            ) from None
         except ValueError as exc:
             # Handle page/paragraph limit errors from extractors
             logger.warning(

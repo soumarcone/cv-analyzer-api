@@ -142,6 +142,10 @@ class AppSettings(BaseSettings):
         500,
         description="Maximum number of paragraphs allowed in DOCX files",
     )
+    file_extraction_timeout_seconds: int = Field(
+        10,
+        description="Timeout for file extraction operations (PDF/DOCX)",
+    )
     api_key_required: bool = Field(
         True,
         description="Whether API key authentication is required",
