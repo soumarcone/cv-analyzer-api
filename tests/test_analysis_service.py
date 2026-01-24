@@ -422,8 +422,8 @@ class TestAnalysisServiceIntegration:
         assert result.summary == "Fresh analysis"
         assert result.fit_score == 70
 
-        # Verify LLM was called for validation and analysis
-        assert mock_llm.generate_json.await_count == 2
+        # Verify LLM was called for CV validation, job validation, and analysis
+        assert mock_llm.generate_json.await_count == 3
 
         # Verify result was cached
         cache_key = _hash_inputs(cv_text, job_text)

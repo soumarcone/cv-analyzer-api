@@ -51,8 +51,11 @@ async def parse_cv(cv_file: UploadFile = File(...)) -> dict:
     dependencies=[Depends(verify_api_key), Depends(enforce_rate_limit)],
 )
 async def analyze_cv(
-    cv_file: UploadFile = File(...),
-    job_description: str = Form(...),
+    cv_file: UploadFile = File(..., description="CV file in PDF or DOCX format"),
+    job_description: str = Form(
+        ...,
+        description="Job description text (supports multi-line). Include responsibilities, requirements, and company info.",
+    ),
 ) -> CVAnalysisResponse:
     """Analyze CV against job description endpoint.
     
