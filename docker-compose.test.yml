@@ -1,8 +1,6 @@
-version: '3.8'
-
 # Docker Compose configuration for running tests
 # Usage: docker compose -f docker-compose.test.yml run --rm api
-# 
+#
 # This configuration:
 # - Sets APP_ENV=testing automatically
 # - Injects test environment variables
