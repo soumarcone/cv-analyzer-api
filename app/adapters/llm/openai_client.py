@@ -8,6 +8,7 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from app.adapters.llm.base import AbstractLLMClient
+from app.core.errors import LLMAppError
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,11 @@ class OpenAIClient(AbstractLLMClient):
                         "error_code": "empty_response",
                     },
                 )
-                raise RuntimeError("LLM returned empty response")
+                raise LLMAppError(
+                    code="empty_response",
+                    message="LLM returned empty response. Please try again.",
+                    details={"model": self.model},
+                )
             
             content = content.strip()
             latency_ms = (time.perf_counter() - start_time) * 1000
@@ -138,7 +143,11 @@ class OpenAIClient(AbstractLLMClient):
                     "error_code": "api_error",
                 },
             )
-            raise RuntimeError(f"OpenAI API error: {str(exc)}") from exc
+            raise LLMAppError(
+                code="api_error",
+                message="OpenAI API error. Please try again later.",
+                details={"provider": "openai", "model": self.model},
+            ) from exc
 
         # Parse and validate JSON
         try:
@@ -169,7 +178,8 @@ class OpenAIClient(AbstractLLMClient):
                     "latency_ms": latency_ms,
                 },
             )
-            raise RuntimeError(
-                f"LLM returned invalid JSON: {str(exc)}; "
-                "consider using stricter prompts or schema enforcement"
+            raise LLMAppError(
+                code="invalid_json",
+                message="LLM returned invalid JSON. Please try again.",
+                details={"model": self.model, "hint": "Consider using stricter prompts or schema enforcement"},
             ) from exc

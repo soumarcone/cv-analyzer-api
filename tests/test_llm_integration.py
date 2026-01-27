@@ -13,7 +13,7 @@ os.environ.setdefault("LLM_API_KEY", "test-key")
 
 from app.adapters.llm import OpenAIClient, create_llm_client
 from app.core.config import settings, LLMSettings, Settings, AppSettings
-from app.core.errors import ValidationAppError
+from app.core.errors import ValidationAppError, LLMAppError
 
 
 class TestOpenAIClientIntegration:
@@ -106,8 +106,11 @@ class TestOpenAIClientIntegration:
             new_callable=AsyncMock,
             return_value=mock_response,
         ):
-            with pytest.raises(RuntimeError, match="invalid JSON"):
+            with pytest.raises(LLMAppError) as exc_info:
                 await client.generate_json(prompt="Test")
+            
+            assert exc_info.value.code == "invalid_json"
+            assert "invalid JSON" in exc_info.value.message
 
 
 class TestLLMFactory:
