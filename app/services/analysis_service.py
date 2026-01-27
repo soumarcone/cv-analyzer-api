@@ -12,11 +12,12 @@ text into structured, validated analysis results. It handles:
 import hashlib
 import logging
 import textwrap
-from typing import Any
+from typing import Any, Literal
 
 from app.adapters.llm.base import AbstractLLMClient
 from app.core.config import settings
 from app.core.errors import ValidationAppError
+from app.core.logging import get_request_id
 from app.schemas.analysis import CVAnalysisResponse
 from app.utils.simple_cache import SimpleTTLCache
 
@@ -219,17 +220,25 @@ class AnalysisService:
 
         return cv_text, job_text
 
-    async def _validate_cv_semantic_content(self, cv_text: str) -> None:
+    async def _validate_cv_semantic_content(
+        self,
+        cv_text: str,
+        warnings: list[str] | None = None,
+    ) -> None:
         """Validate if text content appears to be a valid CV using LLM.
 
-        Uses LLM to analyze if the text has characteristics of a CV:
-        - Professional experience
-        - Education
-        - Skills
-        - Contact information
+        DESIGN DECISION: This validation is **fail-open** to prioritize availability.
+        If the LLM validation fails unexpectedly, we log the failure and continue
+        the analysis so the user still receives a result (potentially with a warning).
+
+        Rationale:
+        1. LLM validation is probabilistic and can fail for transient reasons.
+        2. Prefer returning partial analysis over blocking the user.
+        3. Users should be informed via warnings when validation is skipped.
 
         Args:
             cv_text: Extracted CV text to validate.
+            warnings: Optional warning collector to surface skipped validation.
 
         Raises:
             ValidationAppError: If content doesn't appear to be a valid CV.
@@ -320,24 +329,28 @@ class AnalysisService:
 
         except ValidationAppError:
             raise
-        except Exception as e:
-            # Log but don't block on validation errors - fail open for now
-            logger.warning(
-                "analyze.cv_validation_failed",
-                extra={"error": str(e)},
+        except Exception as exc:
+            self._handle_semantic_validation_failure(
+                stage="cv",
+                error=exc,
+                text=cv_text,
+                warnings=warnings,
             )
 
-    async def _validate_job_semantic_content(self, job_text: str) -> None:
+    async def _validate_job_semantic_content(
+        self,
+        job_text: str,
+        warnings: list[str] | None = None,
+    ) -> None:
         """Validate if text content appears to be a valid job description using LLM.
 
-        Uses LLM to analyze if the text has characteristics of a job posting:
-        - Job responsibilities or duties
-        - Required qualifications or skills
-        - Company information
-        - Role details
+        DESIGN DECISION: This validation is **fail-open** to keep analysis available
+        even when semantic checks fail unexpectedly (e.g., LLM timeouts). Failures
+        are logged with context and optionally surfaced as warnings to the caller.
 
         Args:
             job_text: Extracted job description text to validate.
+            warnings: Optional warning collector to surface skipped validation.
 
         Raises:
             ValidationAppError: If content doesn't appear to be a valid job description.
@@ -430,11 +443,50 @@ class AnalysisService:
 
         except ValidationAppError:
             raise
-        except Exception as e:
-            # Log but don't block on validation errors - fail open for now
-            logger.warning(
-                "analyze.job_validation_failed",
-                extra={"error": str(e)},
+        except Exception as exc:
+            self._handle_semantic_validation_failure(
+                stage="job",
+                error=exc,
+                text=job_text,
+                warnings=warnings,
+            )
+
+    def _handle_semantic_validation_failure(
+        self,
+        *,
+        stage: Literal["cv", "job"],
+        error: Exception,
+        text: str,
+        warnings: list[str] | None = None,
+    ) -> None:
+        """Handle unexpected semantic validation failures in a fail-open manner.
+
+        Logs structured context for observability and appends a warning (if provided)
+        so callers can surface that semantic validation was skipped.
+
+        Args:
+            stage: "cv" or "job" to indicate which validation failed.
+            error: The caught exception.
+            text: The input text (only length is logged to avoid sensitive data).
+            warnings: Optional warning collector to inform callers about skip.
+        """
+
+        logger.warning(
+            "analyze.semantic_validation_fail_open",
+            extra={
+                "validation_stage": stage,
+                "error_type": type(error).__name__,
+                "error_code": getattr(error, "code", None),
+                "error_msg": str(error),
+                "char_count": len(text),
+                "request_id": get_request_id(),
+            },
+        )
+
+        if warnings is not None:
+            human_stage = "CV" if stage == "cv" else "job description"
+            warnings.append(
+                f"Semantic {human_stage} validation was skipped due to an internal error; proceeding fail-open."
             )
 
     def _get_from_cache(self, cache_key: str) -> CVAnalysisResponse | None:
@@ -577,8 +629,8 @@ class AnalysisService:
                 return cached_analysis
 
             # Step 4: Validate CV and job semantic content using LLM (only for cache miss)
-            await self._validate_cv_semantic_content(cv_text)
-            await self._validate_job_semantic_content(job_text)
+            await self._validate_cv_semantic_content(cv_text, warnings)
+            await self._validate_job_semantic_content(job_text, warnings)
 
             # Step 5: Generate fresh analysis via LLM
             analysis = await self._generate_analysis(cv_text, job_text, warnings)
