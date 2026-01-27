@@ -14,6 +14,7 @@ from typing import Optional, Tuple, cast
 from fastapi import UploadFile
 
 from app.core.config import settings
+from app.core.errors import ValidationAppError
 from app.utils.docx_extractor import extract_text_from_docx_bytes
 from app.utils.pdf_extractor import extract_text_from_pdf_bytes
 from app.utils.text_normalizer import normalize_text
@@ -228,9 +229,16 @@ async def parse_cv_file(cv_file: UploadFile, file_bytes: Optional[bytes] = None)
                     "timeout_seconds": settings.app.file_extraction_timeout_seconds,
                 },
             )
-            raise ValueError(
-                f"File extraction took too long (timeout: {settings.app.file_extraction_timeout_seconds}s). "
-                "File may be corrupted or too complex."
+            raise ValidationAppError(
+                code="extraction_timeout",
+                message=(
+                    f"File extraction took too long (timeout: {settings.app.file_extraction_timeout_seconds}s). "
+                    "File may be corrupted or too complex."
+                ),
+                details={
+                    "timeout_seconds": settings.app.file_extraction_timeout_seconds,
+                    "file_type": file_type,
+                },
             ) from None
         except ValueError as exc:
             # Handle page/paragraph limit errors from extractors

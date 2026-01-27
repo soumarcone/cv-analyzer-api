@@ -38,6 +38,8 @@ async def parse_cv(cv_file: UploadFile = File(...)) -> dict:
         file_bytes = await read_upload_file_limited(cv_file)
         result = await parse_cv_file(cv_file, file_bytes=file_bytes)
         return result
+    except ValidationAppError as exc:
+        raise HTTPException(status_code=400, detail=exc.message)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except HTTPException:
@@ -78,6 +80,8 @@ async def analyze_cv(
     try:
         file_bytes = await read_upload_file_limited(cv_file)
         parsed_cv = await parse_cv_file(cv_file, file_bytes=file_bytes)
+    except ValidationAppError as exc:
+        raise HTTPException(status_code=400, detail=exc.message)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except HTTPException:
