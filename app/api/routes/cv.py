@@ -10,7 +10,7 @@ from app.services.analysis_service import AnalysisService
 from app.services.cv_parser_service import parse_cv_file
 from app.utils.simple_cache import SimpleTTLCache
 
-router = APIRouter()
+router = APIRouter(tags=["CV"])
 
 # Initialize dependencies for analysis endpoint
 _llm_client = create_llm_client()
@@ -18,8 +18,15 @@ _cache = SimpleTTLCache(ttl_seconds=3600, max_entries=1024)
 _analysis_service = AnalysisService(llm=_llm_client, cache=_cache)
 
 
-@router.post("/cv/parse", dependencies=[Depends(verify_api_key), Depends(enforce_rate_limit)])
-async def parse_cv(cv_file: UploadFile = File(...)) -> dict:
+from app.schemas.parse import ParseCVResponse
+
+
+@router.post(
+    "/cv/parse",
+    response_model=ParseCVResponse,
+    dependencies=[Depends(verify_api_key), Depends(enforce_rate_limit)],
+)
+async def parse_cv(cv_file: UploadFile = File(...)) -> ParseCVResponse:
     """Parse uploaded CV file endpoint.
     
     Accepts PDF or DOCX files, extracts text content, and returns
@@ -37,7 +44,7 @@ async def parse_cv(cv_file: UploadFile = File(...)) -> dict:
     try:
         file_bytes = await read_upload_file_limited(cv_file)
         result = await parse_cv_file(cv_file, file_bytes=file_bytes)
-        return result
+        return ParseCVResponse(**result)
     except ValidationAppError as exc:
         raise HTTPException(status_code=400, detail=exc.message)
     except ValueError as exc:
