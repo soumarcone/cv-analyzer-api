@@ -7,7 +7,27 @@ consistent error handling, logging, and API responses.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NotRequired, TypedDict
+
+
+class ErrorDetails(TypedDict, total=False):
+    """Structured error context for observability and clients.
+
+    Fields are optional to keep backward compatibility while encouraging
+    consistent shapes across the codebase.
+    """
+
+    code: str
+    message: str
+    hint: str
+    min_value: int
+    actual_value: int
+    http_status: int
+    retry_after: float
+    file_type: str
+    model: str
+    request_id: str
+    context: NotRequired[dict[str, Any]]
 
 
 @dataclass
@@ -22,7 +42,7 @@ class AppError(Exception):
 
     code: str
     message: str
-    details: Any | None = None
+    details: ErrorDetails | None = None
 
     def __post_init__(self) -> None:
         # Populate Exception args so str(error) is useful in logs/tracebacks.
