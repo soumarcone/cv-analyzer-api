@@ -2,10 +2,12 @@
 
 > **Production-grade API for analyzing resumes against job descriptions using LLM-powered structured analysis**
 
+[![Version 0.1.0](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/soumarcone/cv-analyzer-api/releases/tag/v0.1.0)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104%2B-009688.svg)](https://fastapi.tiangolo.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Tests](https://img.shields.io/badge/tests-16_suites-success.svg)](./tests)
+[![Changelog](https://img.shields.io/badge/changelog-CHANGELOG.md-informational.svg)](./CHANGELOG.md)
 
 ---
 
